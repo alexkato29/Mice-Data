@@ -1,0 +1,585 @@
+---
+title: "Mice Data Analysis"
+format: pdf
+editor: visual
+---
+
+```{r, echo=FALSE, include=FALSE}
+library(dplyr)
+library(tidyr)
+library(lme4)
+library(nlme)
+library(lmtest)
+library(lmerTest)
+library(multcomp)
+library(ggplot2)
+library(sjPlot)
+library(ggpubr)
+library(GGally)
+library(knitr)
+library(pairwiseCI)
+```
+
+### Importing the Data
+
+```{r}
+fetus_full <- read.csv("data/fetus-cleaned.csv", header=T)
+
+fetus <- fetus_full %>%
+  filter(Fetus_genotype != "resorp") %>%
+  na.omit() # One empty row. Not sure why...
+```
+
+We drop all resorp fetuses. This is because they do not provide information. Of course, the data are not missing at random in this case. However, we can conduct an entirely separate analysis of resorp vs living fetuses later on if that's required.
+
+### Assessing Normality of Features and Dependent Variables
+
+First we assess the proportion of male v. female fetuses to make sure our data are not skewed.
+
+```{r}
+# Define colors for each sex
+color_female <- "#ec407a"  # pink
+color_male <- "#1e88e5"    # blue
+  
+ggplot(fetus, aes(x = Fetal_sex, fill = Fetal_sex)) +
+  geom_bar() +
+  scale_fill_manual(values = c(color_female, color_male)) +
+  xlab("Fetal Sex") +
+  ylab("Count") +
+  ggtitle("Histogram of Fetal Sex")
+
+mean(fetus$isFemale)
+```
+
+Approximately 50% of surviving fetuses are female, so no worries about composition of the data.
+
+```{r}
+hist(fetus$Placenta_mass)
+ggqqplot(fetus$Placenta_mass)
+shapiro.test(fetus$Placenta_mass)
+```
+
+Placenta mass is not normally distributed (right-skewed)
+
+```{r}
+hist(fetus$Fetal_mass)
+ggqqplot(fetus$Fetal_mass)
+shapiro.test(fetus$Fetal_mass)
+```
+
+Fetal mass not normally distributed (bimodal). Perhaps bimodality has to do with the sex of the fetus? Worth investigating because, if not, could be related to the genotype.
+
+```{r}
+hist(fetus$Fetal_placental.ratio)
+ggqqplot(fetus$Fetal_placental.ratio)
+shapiro.test(fetus$Fetal_placental.ratio)
+```
+
+Fetal/placental ratio is not normally distributed (right skew). This makes sense since it's a transformation that is not a sum of two non-normal random variables.
+
+Let's return to assessing fetal mass. Maybe it is related to gender?
+
+```{r}
+# Plot side by side histograms of fetal mass faceted by fetal sex with different colors
+ggplot(fetus, aes(x = Fetal_mass, fill = Fetal_sex)) +
+  geom_histogram(binwidth = 0.1) +
+  scale_fill_manual(values = c(color_female, color_male)) +
+  xlab("Fetal Mass") +
+  ylab("Count") +
+  ggtitle("Histogram of Fetal Mass") +
+  facet_wrap(~ Fetal_sex, ncol = 2)
+```
+
+This did not help the bimodality. There is more going on here. Maybe it is related to the genotypes?
+
+Now we visually assess the relationship between our variables of interest and the genotypes using boxplots.
+
+```{r}
+# Boxplot of Fetal_mass by Maternal_genotype
+ggplot(fetus, aes(x = Maternal_genotype, y = Fetal_mass)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Maternal Genotype") +
+  ylab("Fetal Mass") +
+  ggtitle("Boxplot of Fetal Mass by Maternal Genotype") +
+  theme_bw()
+
+# Boxplot of Placenta_mass by Maternal_genotype
+ggplot(fetus, aes(x = Maternal_genotype, y = Placenta_mass)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Maternal Genotype") +
+  ylab("Placenta Mass") +
+  ggtitle("Boxplot of Placenta Mass by Maternal Genotype") +
+  theme_bw()
+
+# Boxplot of Fetal_placental.ratio by Maternal_genotype
+ggplot(fetus, aes(x = Maternal_genotype, y = Fetal_placental.ratio)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Maternal Genotype") +
+  ylab("Fetal-Placental Ratio") +
+  ggtitle("Boxplot of Fetal-Placental Ratio by Maternal Genotype") +
+  theme_bw()
+
+```
+
+```{r}
+# Boxplot of Fetal_mass by Fetus_genotype
+ggplot(fetus, aes(x = Fetus_genotype, y = Fetal_mass)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Fetus Genotype") +
+  ylab("Fetal Mass") +
+  ggtitle("Boxplot of Fetal Mass by Fetus Genotype") +
+  theme_bw()
+
+# Boxplot of Placenta_mass by Fetus_genotype
+ggplot(fetus, aes(x = Fetus_genotype, y = Placenta_mass)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Fetus Genotype") +
+  ylab("Placenta Mass") +
+  ggtitle("Boxplot of Placenta Mass by Fetus Genotype") +
+  theme_bw()
+
+# Boxplot of Fetal_placental.ratio by Fetus_genotype
+ggplot(fetus, aes(x = Fetus_genotype, y = Fetal_placental.ratio)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Fetus Genotype") +
+  ylab("Fetal-Placental Ratio") +
+  ggtitle("Boxplot of Fetal-Placental Ratio by Fetus Genotype") +
+  theme_bw()
+```
+
+In all cases, it looks like the maternal/fetal genotype has no impact on our dependent variables. In all honesty, it's likely that masses have much more to do with the mass of the mother/father rats since it is genetic. It also might have to do with the day of conception. Presumably, if a fetus is a few days older, it will weigh more on average. I have limited subject expertise though, so I am not sure.
+
+This could be assessed by linking the mother dataset to the fetus dataset, but there is no joining variable (dam id missing from mother dataset?)
+
+Let's look at the last variables of interest for modeling, Litter_size and Fetal_sex.
+
+```{r}
+# Boxplot of Fetal_mass by Litter_size
+ggplot(fetus, aes(x = as.factor(Litter_size), y = Fetal_mass)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Litter Size") +
+  ylab("Fetal Mass") +
+  ggtitle("Boxplot of Fetal Mass by Litter Size") +
+  theme_bw()
+
+# Boxplot of Placenta_mass by Litter_size
+ggplot(fetus, aes(x = as.factor(Litter_size), y = Placenta_mass)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Litter Size") +
+  ylab("Placenta Mass") +
+  ggtitle("Boxplot of Placenta Mass by Litter Size") +
+  theme_bw()
+
+# Boxplot of Fetal_placental_ratio by Litter_size
+ggplot(fetus, aes(x = as.factor(Litter_size), y = Fetal_placental.ratio)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Litter Size") +
+  ylab("Fetal-Placental Ratio") +
+  ggtitle("Boxplot of Fetal-Placental Ratio by Litter Size") +
+  theme_bw()
+
+# Boxplot of Fetal_mass by Fetal_sex
+ggplot(fetus, aes(x = Fetal_sex, y = Fetal_mass)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Fetal Sex") +
+  ylab("Fetal Mass") +
+  ggtitle("Boxplot of Fetal Mass by Fetal Sex") +
+  theme_bw()
+
+# Boxplot of Placenta_mass by Fetal_sex
+ggplot(fetus, aes(x = Fetal_sex, y = Placenta_mass)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Fetal Sex") +
+  ylab("Placenta Mass") +
+  ggtitle("Boxplot of Placenta Mass by Fetal Sex") + 
+  theme_bw()
+
+# Boxplot of Fetal_placental_ratio by Fetal_sex
+ggplot(fetus, aes(x = Fetal_sex, y = Fetal_placental.ratio)) +
+  geom_boxplot(fill = "lightblue") +
+  xlab("Fetal Sex") +
+  ylab("Fetal-Placental Ratio") +
+  ggtitle("Boxplot of Fetal-Placental Ratio by Fetal Sex") +
+  theme_bw()
+
+```
+
+Litter size could have an effect. But, what is far more likely, is that litter size captures the variance of Dam.
+
+```{r}
+# Boxplot of Fetal_mass by Dam with box color by Litter_size
+ggplot(fetus, aes(x = as.factor(Dam), y = Fetal_mass, fill = as.factor(Litter_size))) +
+  geom_boxplot() +
+  xlab("Dam") +
+  ylab("Fetal Mass") +
+  labs(fill = "Litter Size") +
+  ggtitle("Boxplot of Fetal Mass by Dam (Colored by Litter Size)") +
+  theme_bw()
+
+# Boxplot of Placenta_mass by Dam with box color by Litter_size
+ggplot(fetus, aes(x = as.factor(Dam), y = Placenta_mass, fill = as.factor(Litter_size))) +
+  geom_boxplot() +
+  xlab("Dam") +
+  ylab("Placenta Mass") +
+  labs(fill = "Litter Size") +
+  ggtitle("Boxplot of Placenta Mass by Dam (Colored by Litter Size)") +
+  theme_bw()
+
+# Boxplot of Fetal_placental_ratio by Dam with box color by Litter_size
+ggplot(fetus, aes(x = as.factor(Dam), y = Fetal_placental.ratio, fill = as.factor(Litter_size))) +
+  geom_boxplot() +
+  xlab("Dam") +
+  ylab("Fetal-Placental Ratio") +
+  labs(fill = "Litter Size") +
+  ggtitle("Boxplot of Fetal-Placental Ratio by Dam (Colored by Litter Size)") +
+  theme_bw()
+```
+
+While these plots are a bit cluttered, what they do show is that there is little correlation between litter size and any of our variables of interest. It also shows that these variables are highly dependent on Dam. Babies from the same mother looks similar (hence why the boxes are not tall and have short tails on average).
+
+### Modeling of the Dependent Variables
+
+Dam is obviously the most important factor here. If we were to train a regression without it, we'd certainly get awful results. In fact, we can see this here. We only do this for Fetal_mass.
+
+```{r}
+model <- lm(Fetal_mass ~ Litter_size + isFemale + Maternal_genotype + Fetus_genotype, data = fetus)
+
+summary(model)
+```
+
+Notice that nothing except for the intercept and Litter_size (which before we proposed might just indirectly be capturing the variance of Dam ID) are significant. With Bayesian model selection, we can confirm this is the case.
+
+```{r}
+y<-fetus$Fetal_mass
+fetus_encoded <- fetus %>%
+  mutate(
+    Maternal_genotype = as.factor(Maternal_genotype),
+    Fetus_genotype = as.factor(Fetus_genotype)
+  )
+
+# Create the design matrix X
+X <- model.matrix(Fetal_mass ~ isFemale + Litter_size + Maternal_genotype + Fetus_genotype, data = fetus_encoded)
+
+lmratio.gprior<-function(z0,z1,y,X,g=dim(X)[1],nu0=1,
+                s200=mean( lm(y~-1+X[,z0==1])$res^2), 
+                s201=mean( lm(y~-1+X[,z1==1])$res^2) ) 
+{
+  n<-dim(X)[1] 
+
+  X0<-X[,z0==1]
+  X1<-X[,z1==1]
+
+  H0<- (g/(g+1)) * X0%*%solve(t(X0)%*%X0)%*%t(X0)
+  SS0<- t(y)%*%( diag(1,nrow=n)  - H0 ) %*%y
+  p0<-sum(z0==1) 
+
+  H1<- (g/(g+1)) * X1%*%solve(t(X1)%*%X1)%*%t(X1)
+  SS1<- t(y)%*%( diag(1,nrow=n)  - H1 ) %*%y
+  p1<-sum(z1==1)  
+ 
+   -.5*(p1-p0)*log( 2*pi*(1+g))  + 
+    .5*nu0*log(s201/s200) + .5*(nu0+n)*log( (nu0*s200+SS0)/(nu0+s201+SS1) )
+}
+
+lpy.X<-function(y,X,g=length(y),nu0=1,s20=try(summary(lm(y~-1+X))$sigma^2,silent=TRUE)) 
+{
+  n<-dim(X)[1] ; p<-dim(X)[2] 
+  if(p==0) { s20<-mean(y^2) }
+  H0<-0 ; if(p>0) { H0<- (g/(g+1)) * X%*%solve(t(X)%*%X)%*%t(X) }
+  SS0<- t(y)%*%( diag(1,nrow=n)  - H0 ) %*%y
+
+  -.5*n*log(2*pi) +lgamma(.5*(nu0+n)) - lgamma(.5*nu0)  - .5*p*log(1+g) +
+   .5*nu0*log(.5*nu0*s20) -.5*(nu0+n)*log(.5*(nu0*s20+SS0))
+}
+```
+
+```{r}
+#### Bayesian model selection
+p<-dim(X)[2]
+S<-1000
+z<-rep(1,p)
+Z<-matrix(NA,S,p)
+lpy.c<-lpy.X(y,X[,z==1,drop=FALSE])
+for(s in 1:S)
+{
+  for(j in sample(1:p))
+  {
+    zp<-z ; zp[j]<-1-zp[j]
+    lpy.p<-lpy.X(y,X[,zp==1,drop=FALSE])
+    r<- (lpy.p - lpy.c)*(-1)^(zp[j]==0)
+    z[j]<-rbinom(1,1,1/(1+exp(-r)))
+    if(z[j]==zp[j]) {lpy.c<-lpy.p}
+  }
+  Z[s,]<-z
+} 
+
+means <- colMeans(Z)
+matrix(means, nrow = 1, ncol = ncol(Z), dimnames = list(NULL, colnames(X)))
+```
+
+Only the intercept and Litter Size are probably features. We will thus switch over to a mixed model to see if there is any value to the genotypes.
+
+```{r}
+fetal_mass_model<-lmer(Fetal_mass ~ Litter_size + isFemale*Fetus_genotype + (1|Dam) + (1|Maternal_genotype), data=fetus)
+summary(fetal_mass_model)
+```
+
+```{r}
+placenta_mass_model<-lmer(Placenta_mass ~ Litter_size + isFemale*Fetus_genotype + (1|Dam) + (1|Maternal_genotype), data=fetus)
+summary(placenta_mass_model)
+```
+
+```{r}
+fpratio_model<-lmer(Fetal_placental.ratio ~ Litter_size + isFemale*Fetus_genotype + (1|Dam) + (1|Maternal_genotype), data=fetus)
+summary(fpratio_model)
+```
+
+We've noticed that a fetus of genotype WT might have, on average, higher fetal mass. We investigate this claim on 4 mothers with the largest litter sizes.
+
+filtered_fetus
+
+```{r}
+# Filter the dataset to include observations from the four Dams with the largest litter size
+dam_values <- unique(fetus %>%
+  group_by(Dam) %>%
+  arrange(desc(Litter_size)) %>%
+  top_n(4, Dam) %>%
+  pull(Dam)
+)[1:4]
+
+# Filter the dataset to include observations where Dam is one of the specified values
+dam1 <- fetus %>%
+  filter(Dam == dam_values[1])
+dam2 <- fetus %>%
+  filter(Dam == dam_values[2])
+dam3 <- fetus %>%
+  filter(Dam == dam_values[3])
+dam4 <- fetus %>%
+  filter(Dam == dam_values[4])
+```
+
+The plots below show the actual values.
+
+```{r}
+ggplot(dam1, aes(y = Fetal_mass, x = Fetus_genotype)) +
+  geom_boxplot() +
+  ylab("Fetal Mass") +
+  xlab("Fetus Genotype") +
+  ggtitle("Histogram of Fetal Mass")
+
+ggplot(dam2, aes(y = Fetal_mass, x = Fetus_genotype)) +
+  geom_boxplot() +
+  ylab("Fetal Mass") +
+  xlab("Fetus Genotype") +
+  ggtitle("Histogram of Fetal Mass")
+
+ggplot(dam3, aes(y = Fetal_mass, x = Fetus_genotype)) +
+  geom_boxplot() +
+  ylab("Fetal Mass") +
+  xlab("Fetus Genotype") +
+  ggtitle("Histogram of Fetal Mass")
+
+ggplot(dam4, aes(y = Fetal_mass, x = Fetus_genotype)) +
+  geom_boxplot() +
+  ylab("Fetal Mass") +
+  xlab("Fetus Genotype") +
+  ggtitle("Histogram of Fetal Mass")
+```
+
+```{r}
+dam1$predicted = predict(fetal_mass_model, newdata=dam1)
+dam2$predicted = predict(fetal_mass_model, newdata=dam2)
+dam3$predicted = predict(fetal_mass_model, newdata=dam3)
+dam4$predicted = predict(fetal_mass_model, newdata=dam4)
+
+ggplot(dam1, aes(y = predicted, x = Fetus_genotype)) +
+  geom_boxplot() +
+  ylab("Predicted Fetal Mass") +
+  xlab("Fetus Genotype") +
+  ggtitle("Histogram of Predicted Fetal Mass")
+
+ggplot(dam2, aes(y = predicted, x = Fetus_genotype)) +
+  geom_boxplot() +
+  ylab("Predicted Fetal Mass") +
+  xlab("Fetus Genotype") +
+  ggtitle("Histogram of Predicted Fetal Mass")
+
+ggplot(dam3, aes(y = predicted, x = Fetus_genotype)) +
+  geom_boxplot() +
+  ylab("Predicted Fetal Mass") +
+  xlab("Fetus Genotype") +
+  ggtitle("Histogram of Predicted Fetal Mass")
+
+ggplot(dam4, aes(y = predicted, x = Fetus_genotype)) +
+  geom_boxplot() +
+  ylab("Predicted Fetal Mass") +
+  xlab("Fetus Genotype") +
+  ggtitle("Histogram of Predicted Fetal Mass")
+```
+
+### Mother Data
+
+```{r}
+mother <- read.csv("data/mother-data.csv", header=T)
+```
+
+Now we'd like to assess the differences in mean blood glucose levels between maternal genotypes. For each time period, we will check if there is normality and constant variance, then conduct an ANCOVA analysis to see if the genotype makes a difference.
+
+```{r}
+# Checking visually
+ggplot(mother, aes(sample=gluc_60)) + 
+  stat_qq() +
+  stat_qq_line() +
+  ggtitle("QQ plot for glucose level")
+
+# Checking mathematically
+shapiro.test(mother$gluc_60)
+```
+
+Normality is satisfied.
+
+```{r}
+mother %>%
+  group_by(Maternal_genotype) %>%
+  summarise(n = n(), mean = mean(gluc_60), sd = sd(gluc_60))
+```
+
+Constant variance is satisfied (95/34 $\approx$ 2.8 and sample size is small, so this is fine).
+
+```{r}
+# First, construct a model including covariates
+model <- lm(gluc_60 ~ Maternal_genotype + num_fetus + percent_body_weight_gain, data = mother)
+
+# Then perform ANCOVA using the model
+anova(model)
+```
+
+We find that only at 60 minutes are we 95% confident that there is a difference in average blood glucose level.
+
+Now we repeat this for % change in blood glucose levels
+
+```{r}
+# Checking visually
+ggplot(mother, aes(sample=chng_base_15)) + 
+  stat_qq() +
+  stat_qq_line() +
+  ggtitle("QQ plot for glucose level")
+
+ggplot(mother, aes(sample=chng_base_30)) + 
+  stat_qq() +
+  stat_qq_line() +
+  ggtitle("QQ plot for glucose level")
+
+ggplot(mother, aes(sample=chng_base_60)) + 
+  stat_qq() +
+  stat_qq_line() +
+  ggtitle("QQ plot for glucose level")
+
+# Checking mathematically
+shapiro.test(mother$chng_base_15)
+
+shapiro.test(mother$chng_base_30)
+
+shapiro.test(mother$chng_base_60)
+```
+
+Normality is satisfied.
+
+```{r}
+mother %>%
+  group_by(Maternal_genotype) %>%
+  summarise(n = n(), mean = mean(chng_base_15), sd = sd(chng_base_15))
+
+mother %>%
+  group_by(Maternal_genotype) %>%
+  summarise(n = n(), mean = mean(chng_base_30), sd = sd(chng_base_30))
+
+mother %>%
+  group_by(Maternal_genotype) %>%
+  summarise(n = n(), mean = mean(chng_base_60), sd = sd(chng_base_60))
+```
+
+Constant variance is satisfied.
+
+```{r}
+# First, construct a model including covariates
+model_15_30 <- lm(chng_15_30 ~ Maternal_genotype + num_fetus + percent_body_weight_gain, data = mother)
+model_base_30 <- lm(chng_base_30 ~ Maternal_genotype + num_fetus + percent_body_weight_gain, data = mother)
+model_base_60 <- lm(chng_base_60 ~ Maternal_genotype + num_fetus + percent_body_weight_gain, data = mother)
+
+# Then perform ANCOVA using the model
+anova(model_15_30)
+anova(model_base_30)
+anova(model_base_60)
+```
+
+15-30, base-30, base-60 all have significant p-values to suggest a difference among maternal genotype groups.
+
+Now we are interested in assessing the impact of Maternal Genotype on the \# of fetuses, \# of absorptions, body weight gain, and % body weight gain.
+
+We first do this visually and with linear models.
+
+```{r}
+# Num Fetuses
+ggplot(data = mother, aes(x = Maternal_genotype, y = num_fetus)) +
+  geom_boxplot() +
+  xlab("Maternal Genotype") +
+  ylab("Number of Fetuses") +
+  ggtitle("Box Plots of Number of Fetuses by Maternal Genotype") +
+  theme_bw()
+
+model <- lm(num_fetus ~ Maternal_genotype, data=mother)
+
+summary(model)
+```
+
+No impact of maternal genotype on the \# of fetus
+
+```{r}
+# Num Absorptions
+ggplot(data = mother, aes(x = Maternal_genotype, y = absorptions)) +
+  geom_boxplot() +
+  xlab("Maternal Genotype") +
+  ylab("Number of Absorptions") +
+  ggtitle("Box Plots of Number of Absorptions by Maternal Genotype") +
+  theme_bw()
+
+# Use poisson regression for count data
+model <- glm(absorptions ~ Maternal_genotype, data=mother, family="poisson")
+
+summary(model)
+```
+
+No attributable effect of maternal genotype on number of absorptions, almost meaningless analysis though since there's very little data
+
+```{r}
+# Body weight gain
+ggplot(data = mother, aes(x = Maternal_genotype, y = body_weight_gain)) +
+  geom_boxplot() +
+  xlab("Maternal Genotype") +
+  ylab("Body Weight Gain") +
+  ggtitle("Box Plots of Body Weight Gain by Maternal Genotype") +
+  theme_bw()
+
+model <- lm(body_weight_gain ~ Maternal_genotype, data=mother)
+
+summary(model)
+```
+
+No significant effect of maternal genotype on body weight gain.
+
+```{r}
+# % body weight gain
+ggplot(data = mother, aes(x = Maternal_genotype, y = percent_body_weight_gain)) +
+  geom_boxplot() +
+  xlab("Maternal Genotype") +
+  ylab("% Body Weight Gain") +
+  ggtitle("Box Plots of % Body Weight Gain by Maternal Genotype") +
+  theme_bw()
+
+model <- lm(percent_body_weight_gain ~ Maternal_genotype, data=mother)
+
+summary(model)
+```
+
+No significant effect of % bw gain.
