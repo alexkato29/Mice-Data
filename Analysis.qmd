@@ -18,6 +18,8 @@ library(ggpubr)
 library(GGally)
 library(knitr)
 library(pairwiseCI)
+library(tidyverse)
+library(broom)
 ```
 
 ### Importing the Data
@@ -426,6 +428,28 @@ mother <- read.csv("data/mother-data.csv", header=T)
 Now we'd like to assess the differences in mean blood glucose levels between maternal genotypes. For each time period, we will check if there is normality and constant variance, then conduct an ANCOVA analysis to see if the genotype makes a difference.
 
 ```{r}
+# Manual Computation of CIs and Pvals. Will be used for Pairwise Comparison
+
+compute_CI_pval <- function(mu1, mu2, conf_level, n1, n2, N, K, MSw) {
+  # Pairwise CI computation of the difference between mu1 and mu2 (0 being no diff)
+  mu = mu1 - mu2
+  sd = sqrt(MSw * (1/n1 + 1/n2))
+  
+  bonf = 1 - ((1-conf_level) / (K*2))
+  t = qt(bonf, df = N - K)
+  
+  interval = c(mu - t*sd, mu + t*sd)
+  
+  # Using a normal dist. Maybe incorrect?
+  pval = pnorm(0, mean = mu, sd = sd)
+  
+  return(c(interval, pval))
+}
+
+nplus = 5 ; nfl = 7 ; nhet = 4 ; N = 16 ; K = 3
+```
+
+```{r}
 # Checking visually
 ggplot(mother, aes(sample=gluc_60)) + 
   stat_qq() +
@@ -456,28 +480,44 @@ anova(model)
 
 We find that only at 60 minutes are we 95% confident that there is a difference in average blood glucose level.
 
+```{r}
+# Group Comparison Glucose 60
+ggplot(data = mother, aes(x = Maternal_genotype, y = gluc_60)) +
+  geom_boxplot() +
+  xlab("Maternal Genotype") +
+  ylab("Glucose Level at 60 min") +
+  ggtitle("Box Plots of Glucose Levels at 60 min") +
+  theme_bw()
+
+# Glucose 60
+MSw = 4084.7
+muplus = 222.6 ; mufl = 327.1429 ; muhet = 204.25
+compute_CI_pval(mufl, muplus, 0.95, nfl, nplus, N, K, MSw)
+compute_CI_pval(muhet, muplus, 0.95, nhet, nplus, N, K, MSw)
+compute_CI_pval(mufl, muhet, 0.95, nfl, nhet, N, K, MSw)
+```
+
+We are 95% confident that mean glucose levels at 60 min differs between:
+
+-   fl/+ and fl/fl (pval = 0.00261)
+
+-   fl/fl and HET (pval = 0.00108)
+
 Now we repeat this for % change in blood glucose levels
 
 ```{r}
 # Checking visually
-ggplot(mother, aes(sample=chng_base_15)) + 
-  stat_qq() +
-  stat_qq_line() +
-  ggtitle("QQ plot for glucose level")
-
 ggplot(mother, aes(sample=chng_base_30)) + 
   stat_qq() +
   stat_qq_line() +
-  ggtitle("QQ plot for glucose level")
+  ggtitle("QQ plot for % change in glucose levels over 30 minutes")
 
 ggplot(mother, aes(sample=chng_base_60)) + 
   stat_qq() +
   stat_qq_line() +
-  ggtitle("QQ plot for glucose level")
+  ggtitle("QQ plot for % change in glucose levels over 60 minutes")
 
 # Checking mathematically
-shapiro.test(mother$chng_base_15)
-
 shapiro.test(mother$chng_base_30)
 
 shapiro.test(mother$chng_base_60)
@@ -486,10 +526,6 @@ shapiro.test(mother$chng_base_60)
 Normality is satisfied.
 
 ```{r}
-mother %>%
-  group_by(Maternal_genotype) %>%
-  summarise(n = n(), mean = mean(chng_base_15), sd = sd(chng_base_15))
-
 mother %>%
   group_by(Maternal_genotype) %>%
   summarise(n = n(), mean = mean(chng_base_30), sd = sd(chng_base_30))
@@ -503,17 +539,110 @@ Constant variance is satisfied.
 
 ```{r}
 # First, construct a model including covariates
-model_15_30 <- lm(chng_15_30 ~ Maternal_genotype + num_fetus + percent_body_weight_gain, data = mother)
 model_base_30 <- lm(chng_base_30 ~ Maternal_genotype + num_fetus + percent_body_weight_gain, data = mother)
 model_base_60 <- lm(chng_base_60 ~ Maternal_genotype + num_fetus + percent_body_weight_gain, data = mother)
 
 # Then perform ANCOVA using the model
-anova(model_15_30)
 anova(model_base_30)
 anova(model_base_60)
 ```
 
-15-30, base-30, base-60 all have significant p-values to suggest a difference among maternal genotype groups.
+base-30 and base-60 have significant p-values to suggest a difference among maternal genotype groups.
+
+```{r}
+# Group Comparison Change Base to 30 Glucose
+ggplot(data = mother, aes(x = Maternal_genotype, y = chng_base_30)) +
+  geom_boxplot() +
+  xlab("Maternal Genotype") +
+  ylab("Change in Glucose Base to 30 min") +
+  ggtitle("Box Plots of Change in Glucose Levels Through 30 min") +
+  theme_bw()
+
+# Group Comparison Change Base to 60 Glucose
+ggplot(data = mother, aes(x = Maternal_genotype, y = chng_base_60)) +
+  geom_boxplot() +
+  xlab("Maternal Genotype") +
+  ylab("Change in Glucose Base to 60 min") +
+  ggtitle("Box Plots of Change in Glucose Levels Through 60 min") +
+  theme_bw()
+
+# Change in Glucose, Base to 30m
+MSw = 4320.8
+muplus = 85.09862 ; mufl = 185.72052 ; muhet = 66.95435
+compute_CI_pval(mufl, muplus, 0.95, nfl, nplus, N, K, MSw)
+compute_CI_pval(muplus, muhet, 0.95, nhet, nplus, N, K, MSw)
+compute_CI_pval(mufl, muhet, 0.95, nfl, nhet, N, K, MSw)
+
+# Change in Glucose, Base to 60m
+MSw = 2238.6
+muplus = 33.94821 ; mufl = 130.56350 ; muhet = 16.29601
+compute_CI_pval(mufl, muplus, 0.95, nfl, nplus, N, K, MSw)
+compute_CI_pval(muplus, muhet, 0.95, nhet, nplus, N, K, MSw)
+compute_CI_pval(mufl, muhet, 0.95, nfl, nhet, N, K, MSw)
+```
+
+We are 95% confident that change in glucose levels between base and 30 min differs between:
+
+-   fl/+ and fl/fl (pval = 0.00447)
+
+-   fl/fl and HET (pval = 0.00197)
+
+We are 95% confident that change in glucose levels between base and 60 min differs between:
+
+-   fl/+ and fl/fl (pval = 0.000244)
+
+-   fl/fl and HET (pval = 0.0000583)
+
+We repeat this again for insulin levels.
+
+```{r}
+# Checking visually
+ggplot(mother, aes(sample=insulin_60)) + 
+  stat_qq() +
+  stat_qq_line() +
+  ggtitle("QQ plot for % change in glucose levels over 30 minutes")
+
+# Checking mathematically
+shapiro.test(mother$insulin_60)
+
+mother %>%
+  group_by(Maternal_genotype) %>%
+  summarise(n = n(), mean = mean(insulin_60, na.rm=TRUE), sd = sd(insulin_60, na.rm=TRUE))
+
+# First, construct a model including covariates
+model_insulin <- lm(insulin_60 ~ Maternal_genotype + num_fetus + percent_body_weight_gain, data = mother)
+
+# Then perform ANCOVA using the model
+anova(model_insulin)
+tidy(aov(model_insulin)) %>%
+  kable(digits = 3,
+        col.names = c("term", "degrees of freedom", "sum of squares",
+                      "mean squares", "test statistic", "p-value"))
+```
+
+The insulin level at 60 minutes proves to be statistically significant. We are 95% confident there is a difference in insulin levels at 60 minutes between the genotypes.
+
+```{r}
+
+# Group Comparison Insulin 60
+ggplot(data = mother, aes(x = Maternal_genotype, y = insulin_60)) +
+  geom_boxplot() +
+  xlab("Maternal Genotype") +
+  ylab("Insulin Level at 60 min") +
+  ggtitle("Box Plots of Insulin Levels at 60 min") +
+  theme_bw()
+
+# Insulin 60
+MSw = 0.032896
+mufl = 0.41733333 ; muplus = 0.8022 ; muhet = 0.5903333
+compute_CI_pval(muplus, mufl, 0.95, nfl, nplus, N, K, MSw)
+compute_CI_pval(muplus, muhet, 0.95, nhet, nplus, N, K, MSw)
+compute_CI_pval(muhet, mufl, 0.95, nfl, nhet, N, K, MSw)
+```
+
+95% Confident that mean insulin differs at 60 minutes between:
+
+-   fl/+ and fl/fl (pval = 0.000145)
 
 Now we are interested in assessing the impact of Maternal Genotype on the \# of fetuses, \# of absorptions, body weight gain, and % body weight gain.
 
@@ -528,12 +657,12 @@ ggplot(data = mother, aes(x = Maternal_genotype, y = num_fetus)) +
   ggtitle("Box Plots of Number of Fetuses by Maternal Genotype") +
   theme_bw()
 
-model <- lm(num_fetus ~ Maternal_genotype, data=mother)
-
-summary(model)
+pairwiseCI(num_fetus ~ Maternal_genotype, data = mother, conf.level = 1 - (.05/3),
+           var.equal = TRUE) %>%
+  kable(digits = 3)
 ```
 
-No impact of maternal genotype on the \# of fetus
+No apparent relationship between maternal genotype and \# of fetus
 
 ```{r}
 # Num Absorptions
@@ -544,10 +673,9 @@ ggplot(data = mother, aes(x = Maternal_genotype, y = absorptions)) +
   ggtitle("Box Plots of Number of Absorptions by Maternal Genotype") +
   theme_bw()
 
-# Use poisson regression for count data
-model <- glm(absorptions ~ Maternal_genotype, data=mother, family="poisson")
-
-summary(model)
+pairwiseCI(absorptions ~ Maternal_genotype, data = mother, conf.level = 1 - (.05/3),
+           var.equal = TRUE) %>%
+  kable(digits = 3)
 ```
 
 No attributable effect of maternal genotype on number of absorptions, almost meaningless analysis though since there's very little data
@@ -561,9 +689,9 @@ ggplot(data = mother, aes(x = Maternal_genotype, y = body_weight_gain)) +
   ggtitle("Box Plots of Body Weight Gain by Maternal Genotype") +
   theme_bw()
 
-model <- lm(body_weight_gain ~ Maternal_genotype, data=mother)
-
-summary(model)
+pairwiseCI(body_weight_gain ~ Maternal_genotype, data = mother, conf.level = 1 - (.05/3),
+           var.equal = TRUE) %>%
+  kable(digits = 3)
 ```
 
 No significant effect of maternal genotype on body weight gain.
@@ -577,9 +705,9 @@ ggplot(data = mother, aes(x = Maternal_genotype, y = percent_body_weight_gain)) 
   ggtitle("Box Plots of % Body Weight Gain by Maternal Genotype") +
   theme_bw()
 
-model <- lm(percent_body_weight_gain ~ Maternal_genotype, data=mother)
-
-summary(model)
+pairwiseCI(percent_body_weight_gain ~ Maternal_genotype, data = mother, conf.level = 1 - (.05/3),
+           var.equal = TRUE) %>%
+  kable(digits = 3)
 ```
 
 No significant effect of % bw gain.
