@@ -441,7 +441,7 @@ compute_CI_pval <- function(mu1, mu2, conf_level, n1, n2, N, K, MSw) {
   interval = c(mu - t*sd, mu + t*sd)
   
   # Using a normal dist. Maybe incorrect?
-  pval = pnorm(0, mean = mu, sd = sd)
+  pval = pnorm(0, mean = mu, sd = sd) * 2
   
   return(c(interval, pval))
 }
@@ -499,9 +499,9 @@ compute_CI_pval(mufl, muhet, 0.95, nfl, nhet, N, K, MSw)
 
 We are 95% confident that mean glucose levels at 60 min differs between:
 
--   fl/+ and fl/fl (pval = 0.00261)
+-   fl/+ and fl/fl (pval = 0.00521)
 
--   fl/fl and HET (pval = 0.00108)
+-   fl/fl and HET (pval = 0.00216)
 
 Now we repeat this for % change in blood glucose levels
 
@@ -583,15 +583,15 @@ compute_CI_pval(mufl, muhet, 0.95, nfl, nhet, N, K, MSw)
 
 We are 95% confident that change in glucose levels between base and 30 min differs between:
 
--   fl/+ and fl/fl (pval = 0.00447)
+-   fl/+ and fl/fl (pval = 0.00894)
 
--   fl/fl and HET (pval = 0.00197)
+-   fl/fl and HET (pval = 0.00394)
 
 We are 95% confident that change in glucose levels between base and 60 min differs between:
 
--   fl/+ and fl/fl (pval = 0.000244)
+-   fl/+ and fl/fl (pval = 0.000488)
 
--   fl/fl and HET (pval = 0.0000583)
+-   fl/fl and HET (pval = 0.000117)
 
 We repeat this again for insulin levels.
 
@@ -642,7 +642,7 @@ compute_CI_pval(muhet, mufl, 0.95, nfl, nhet, N, K, MSw)
 
 95% Confident that mean insulin differs at 60 minutes between:
 
--   fl/+ and fl/fl (pval = 0.000145)
+-   fl/+ and fl/fl (pval = 0.00029)
 
 Now we are interested in assessing the impact of Maternal Genotype on the \# of fetuses, \# of absorptions, body weight gain, and % body weight gain.
 
